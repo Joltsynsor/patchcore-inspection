@@ -1,3 +1,9 @@
 .idea/
 __pycache__/
 LabletAnomaly.egg-info/
+
+# New
+results/
+masonry_dataset/
+anomaly_heatmaps/
+categorized_dataset/
