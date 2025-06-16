@@ -7,3 +7,7 @@ results/
 masonry_dataset/
 anomaly_heatmaps/
 categorized_dataset/
+perspective_dataset/
+raw_anomaly_masks/
+
+venv/

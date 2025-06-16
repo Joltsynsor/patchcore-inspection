@@ -13,6 +13,7 @@ import patchcore.backbones
 import patchcore.common
 import patchcore.patchcore
 from torchvision import transforms
+from skimage import io  # For TIFF saving
 
 def load_model(model_path, device):
     """Load the trained PatchCore model"""
@@ -33,7 +34,25 @@ def load_model(model_path, device):
     print("Model loaded successfully!")
     return patchcore_model
 
-def generate_heatmap(model, image_path, device, save_path):
+def save_raw_anomaly_mask(anomaly_mask_resized, save_dir, filename_base):
+    """Save raw anomaly mask in multiple formats for post-processing"""
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Save as NumPy array (best for numerical processing)
+    npy_path = os.path.join(save_dir, f"{filename_base}_mask.npy")
+    np.save(npy_path, anomaly_mask_resized)
+
+    # Save as 16-bit PNG (good compatibility, some precision loss)
+    png_path = os.path.join(save_dir, f"{filename_base}_mask.png")
+    # Normalize to 0-65535 range for 16-bit PNG
+    mask_normalized = ((anomaly_mask_resized - anomaly_mask_resized.min()) /
+                      (anomaly_mask_resized.max() - anomaly_mask_resized.min()) * 65535).astype(np.uint16)
+    Image.fromarray(mask_normalized).save(png_path)
+
+    print(f"Raw masks saved: {filename_base}_mask.[npy|png]")
+    return npy_path, png_path
+
+def generate_heatmap(model, image_path, device, save_path, raw_mask_dir):
     """Generate anomaly heatmap for a single image"""
     # Create a minimal dataset instance just to access the transforms
     # We'll override the problematic methods to avoid file system checks
@@ -88,6 +107,10 @@ def generate_heatmap(model, image_path, device, save_path):
     original_size = original_image.size  # (width, height)
     anomaly_mask_resized = np.array(Image.fromarray(anomaly_mask).resize(original_size, Image.BILINEAR))
 
+    # Save raw anomaly mask for post-processing
+    filename_base = os.path.splitext(os.path.basename(image_path))[0]
+    save_raw_anomaly_mask(anomaly_mask_resized, raw_mask_dir, filename_base)
+
     # Create visualization with consistent 0-6 scale
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
@@ -114,7 +137,7 @@ def generate_heatmap(model, image_path, device, save_path):
     plt.close()
 
     print(f"Heatmap saved: {save_path} (Score: {anomaly_score:.3f})")
-    return anomaly_score, anomaly_mask
+    return anomaly_score, anomaly_mask_resized
 
 def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -123,14 +146,16 @@ def main():
     # Load model
     model = load_model(model_path, device)
 
-    # Create output directory
+    # Create output directories
     output_dir = "anomaly_heatmaps"
+    raw_mask_dir = "raw_anomaly_masks"
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(raw_mask_dir, exist_ok=True)
 
     # Process test images
     test_dirs = [
-        "masonry_dataset/wall/test/good",
-        "masonry_dataset/wall/test/defect"
+        "masonry_dataset/wall/test/defect",
+        "masonry_dataset/wall/test/good"
     ]
 
     all_scores = []
@@ -148,20 +173,25 @@ def main():
                 save_path = os.path.join(output_dir, f"{category}_{filename}_heatmap.png")
 
                 try:
-                    score, mask = generate_heatmap(model, image_path, device, save_path)
+                    score, mask = generate_heatmap(model, image_path, device, save_path, raw_mask_dir)
                     all_scores.append((category, filename, score))
                 except Exception as e:
                     print(f"Error processing {filename}: {e}")
 
     # Print summary
-    print(f"\n{'='*50}")
+    print(f"\n{'='*60}")
     print("ANOMALY DETECTION SUMMARY")
-    print(f"{'='*50}")
+    print(f"{'='*60}")
 
     for category, filename, score in sorted(all_scores, key=lambda x: x[2], reverse=True):
         print(f"{category:10} | {filename:20} | Score: {score:.3f}")
 
-    print(f"\nHeatmaps saved in: {output_dir}/")
+    print(f"\nVisualization heatmaps saved in: {output_dir}/")
+    print(f"Raw anomaly masks saved in: {raw_mask_dir}/")
+    print("\nRaw mask formats:")
+    print("- .npy: NumPy array (best for numerical processing)")
+    print("- .tiff: 32-bit TIFF (preserves float values)")
+    print("- .png: 16-bit PNG (good compatibility)")
     print("Higher scores indicate more anomalous regions")
 
 if __name__ == "__main__":
