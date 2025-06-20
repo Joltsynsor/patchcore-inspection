@@ -5,6 +5,7 @@ sys.path.append('src')
 
 import os
 import torch
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -14,6 +15,17 @@ import patchcore.common
 import patchcore.patchcore
 from torchvision import transforms
 from skimage import io  # For TIFF saving
+
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='Run inference with PatchCore model for masonry anomaly detection')
+    parser.add_argument('--version', type=str, default='v1.0',
+                       help='Model version to use for inference (default: v1.0)')
+    parser.add_argument('--device', type=str, default='cuda:0',
+                       help='Device to use for inference (default: cuda:0)')
+    parser.add_argument('--image', type=str, default=None,
+                       help='Path to single image for inference (optional)')
+    return parser.parse_args()
 
 def load_model(model_path, device):
     """Load the trained PatchCore model"""
@@ -140,17 +152,61 @@ def generate_heatmap(model, image_path, device, save_path, raw_mask_dir):
     return anomaly_score, anomaly_mask_resized
 
 def main():
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model_path = "results/masonry_model"
+    # Parse arguments
+    args = parse_args()
+
+    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    print(f"Using model version: {args.version}")
+
+    # Construct model path with version
+    model_path = f"results/masonry_model_{args.version}"
+
+    # Check if model exists
+    if not os.path.exists(model_path):
+        print(f"Error: Model version '{args.version}' not found at {model_path}")
+        print("Available model versions:")
+        results_dir = "results"
+        if os.path.exists(results_dir):
+            for item in os.listdir(results_dir):
+                if item.startswith("masonry_model_"):
+                    version = item.replace("masonry_model_", "")
+                    print(f"  - {version}")
+        else:
+            print("  No models found in results directory")
+        return
 
     # Load model
     model = load_model(model_path, device)
 
-    # Create output directories
-    output_dir = "anomaly_heatmaps"
-    raw_mask_dir = "raw_anomaly_masks"
+    # Create organized output directories within results
+    results_base_dir = "results"
+    output_dir = os.path.join(results_base_dir, "anomaly_heatmaps", args.version)
+    raw_mask_dir = os.path.join(results_base_dir, "anomaly_masks", args.version)
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(raw_mask_dir, exist_ok=True)
+
+    print(f"Output directories:")
+    print(f"  Heatmaps: {output_dir}")
+    print(f"  Raw masks: {raw_mask_dir}")
+
+    # If single image specified, process only that image
+    if args.image:
+        if not os.path.exists(args.image):
+            print(f"Error: Image not found: {args.image}")
+            return
+
+        print(f"Processing single image: {args.image}")
+        filename = os.path.basename(args.image)
+        save_path = os.path.join(output_dir, f"single_{filename}_heatmap.png")
+
+        try:
+            score, mask = generate_heatmap(model, args.image, device, save_path, raw_mask_dir)
+            print(f"Anomaly score: {score:.3f}")
+            print(f"Heatmap saved: {save_path}")
+        except Exception as e:
+            print(f"Error processing image: {e}")
+        return
 
     # Process test images
     test_dirs = [
@@ -181,16 +237,24 @@ def main():
     # Print summary
     print(f"\n{'='*60}")
     print("ANOMALY DETECTION SUMMARY")
+    print(f"Model version: {args.version}")
     print(f"{'='*60}")
 
     for category, filename, score in sorted(all_scores, key=lambda x: x[2], reverse=True):
         print(f"{category:10} | {filename:20} | Score: {score:.3f}")
 
-    print(f"\nVisualization heatmaps saved in: {output_dir}/")
-    print(f"Raw anomaly masks saved in: {raw_mask_dir}/")
+    print(f"\nResults saved in organized structure:")
+    print(f"  Heatmaps: {output_dir}/")
+    print(f"  Raw masks: {raw_mask_dir}/")
+    print("\nDirectory structure:")
+    print("  results/")
+    print("  ├── anomaly_heatmaps/")
+    print(f"  │   └── {args.version}/")
+    print("  ├── anomaly_masks/")
+    print(f"  │   └── {args.version}/")
+    print("  └── masonry_model_*/")
     print("\nRaw mask formats:")
     print("- .npy: NumPy array (best for numerical processing)")
-    print("- .tiff: 32-bit TIFF (preserves float values)")
     print("- .png: 16-bit PNG (good compatibility)")
     print("Higher scores indicate more anomalous regions")
 

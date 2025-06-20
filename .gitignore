@@ -11,3 +11,8 @@ perspective_dataset/
 raw_anomaly_masks/
 
 venv/
+anomaly*/
+dataset/
+depth_maps_processed/
+raw_anomaly*/
+bucket/
